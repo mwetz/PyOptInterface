@@ -78,26 +78,47 @@ def _as_affine(expr) -> ScalarAffineFunction:
     raise ValueError(f"Unsupported linear expression of type {type(expr)}")
 
 
+def _termination_map() -> dict:
+    from pipsipmpppy import TerminationStatus as T
+
+    C = TerminationStatusCode
+    return {
+        T.SUCCESSFUL_TERMINATION: C.OPTIMAL,
+        T.NOT_FINISHED: C.OTHER_ERROR,
+        T.MAX_ITS_EXCEEDED: C.ITERATION_LIMIT,
+        T.TIMELIMIT: C.TIME_LIMIT,
+        T.INFEASIBLE: C.INFEASIBLE,
+        T.UNBOUNDED: C.DUAL_INFEASIBLE,
+        T.READ_ERROR: C.INVALID_MODEL,
+        T.DID_NOT_RUN: C.OPTIMIZE_NOT_CALLED,
+        T.STOPPED_AFTER_PRESOLVE: C.INTERRUPTED,
+        T.SLOW_CONVERGENCE: C.SLOW_PROGRESS,
+        T.NUMERICAL: C.NUMERICAL_ERROR,
+    }
+
+
 def get_terminationstatus(model: "Model") -> TerminationStatusCode:
     if model._status is None:
         return TerminationStatusCode.OPTIMIZE_NOT_CALLED
-    return (
-        TerminationStatusCode.OPTIMAL
-        if model._status == 0
-        else TerminationStatusCode.OTHER_ERROR
-    )
+    return _termination_map().get(model._status, TerminationStatusCode.OTHER_ERROR)
+
+
+def _result_status(model: "Model") -> ResultStatusCode:
+    if model._status is None:
+        return ResultStatusCode.NO_SOLUTION
+    if model._status.is_optimal:
+        return ResultStatusCode.FEASIBLE_POINT
+    if model._status.has_solution:
+        return ResultStatusCode.UNKNOWN_RESULT_STATUS
+    return ResultStatusCode.NO_SOLUTION
 
 
 def get_dualstatus(model: "Model") -> ResultStatusCode:
-    if model._status == 0:
-        return ResultStatusCode.FEASIBLE_POINT
-    return ResultStatusCode.NO_SOLUTION
+    return _result_status(model)
 
 
 def get_primalstatus(model: "Model") -> ResultStatusCode:
-    if model._status == 0:
-        return ResultStatusCode.FEASIBLE_POINT
-    return ResultStatusCode.NO_SOLUTION
+    return _result_status(model)
 
 
 model_attribute_get_func_map = {
@@ -107,7 +128,11 @@ model_attribute_get_func_map = {
     ModelAttribute.PrimalStatus: get_primalstatus,
     ModelAttribute.DualStatus: get_dualstatus,
     ModelAttribute.SolveTimeSec: lambda m: m._runtime,
-    ModelAttribute.RawStatusString: lambda m: f"PIPS-IPM++ status {m._status}",
+    ModelAttribute.RawStatusString: lambda m: (
+        "not optimized"
+        if m._status is None
+        else f"{m._status.name}: {m._status.description}"
+    ),
     ModelAttribute.SolverName: lambda m: "PIPS-IPM++",
     ModelAttribute.Silent: lambda m: m._silent,
 }
@@ -170,7 +195,7 @@ class Model:
         self._cblock: dict[int, int] = {}
         self._options: dict[str, object] = {}
         self._silent: bool = False
-        self._status: Optional[int] = None
+        self._status = None
         self._objective_value: Optional[float] = None
         self._runtime: float = 0.0
         self._dual: list[float] = []
