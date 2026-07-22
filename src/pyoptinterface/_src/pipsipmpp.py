@@ -11,9 +11,9 @@ Equation blocks are derived automatically from the variables a constraint touche
 
 ::
     import pyoptinterface as poi
-    from pyoptinterface import pips
+    from pyoptinterface import pipsipmpp
 
-    model = pips.Model()
+    model = pipsipmpp.Model()
     cap = model.add_variable(lb=0.0, name="cap")
     model.set_variable_attribute(cap, poi.VariableAttribute.Block, 0)   # root
     gen = model.add_variable(lb=0.0, name="gen")
@@ -100,7 +100,7 @@ model_attribute_get_func_map = {
     ModelAttribute.TerminationStatus: get_terminationstatus,
     ModelAttribute.PrimalStatus: get_primalstatus,
     ModelAttribute.DualStatus: lambda m: ResultStatusCode.NO_SOLUTION,
-    ModelAttribute.RawStatusString: lambda m: f"PIPS status {m._status}",
+    ModelAttribute.RawStatusString: lambda m: f"PIPS-IPM++ status {m._status}",
     ModelAttribute.SolverName: lambda m: "PIPS-IPM++",
     ModelAttribute.Silent: lambda m: m._silent,
 }
@@ -389,7 +389,7 @@ class Model:
                     ind.append(j)
                     data.append(coef)
                 ptr.append(len(ind))
-            return sp.csr_matrix(
+            return sp.csr_array(
                 (
                     np.asarray(data, float),
                     np.asarray(ind, int),
