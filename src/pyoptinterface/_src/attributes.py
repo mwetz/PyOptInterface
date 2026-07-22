@@ -12,6 +12,7 @@ class VariableAttribute(Enum):
     IISLowerBound = auto()
     IISUpperBound = auto()
     ReducedCost = auto()
+    Block = auto()
 
 
 var_attr_type_map = {
@@ -24,6 +25,7 @@ var_attr_type_map = {
     VariableAttribute.IISLowerBound: bool,
     VariableAttribute.IISUpperBound: bool,
     VariableAttribute.ReducedCost: float,
+    VariableAttribute.Block: int,
 }
 
 
@@ -127,6 +129,7 @@ class ConstraintAttribute(Enum):
     Dual = auto()
     # BasisStatus = auto()
     IIS = auto()
+    Block = auto()
 
 
 constraint_attr_type_map = {
@@ -134,4 +137,5 @@ constraint_attr_type_map = {
     ConstraintAttribute.Primal: float,
     ConstraintAttribute.Dual: float,
     ConstraintAttribute.IIS: bool,
+    ConstraintAttribute.Block: int,
 }
