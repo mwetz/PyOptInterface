@@ -1265,7 +1265,7 @@ int GurobiModel::_checked_constraint_index(const ConstraintIndex &constraint)
 	int row = _constraint_index(constraint);
 	if (row < 0)
 	{
-		throw std::runtime_error("Variable does not exist");
+		throw std::runtime_error("Constraint does not exist");
 	}
 	return row;
 }
