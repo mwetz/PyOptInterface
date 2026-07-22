@@ -88,6 +88,12 @@ def get_terminationstatus(model: "Model") -> TerminationStatusCode:
     )
 
 
+def get_dualstatus(model: "Model") -> ResultStatusCode:
+    if model._status == 0:
+        return ResultStatusCode.FEASIBLE_POINT
+    return ResultStatusCode.NO_SOLUTION
+
+
 def get_primalstatus(model: "Model") -> ResultStatusCode:
     if model._status == 0:
         return ResultStatusCode.FEASIBLE_POINT
@@ -99,7 +105,8 @@ model_attribute_get_func_map = {
     ModelAttribute.ObjectiveValue: lambda m: m._objective_value,
     ModelAttribute.TerminationStatus: get_terminationstatus,
     ModelAttribute.PrimalStatus: get_primalstatus,
-    ModelAttribute.DualStatus: lambda m: ResultStatusCode.NO_SOLUTION,
+    ModelAttribute.DualStatus: get_dualstatus,
+    ModelAttribute.SolveTimeSec: lambda m: m._runtime,
     ModelAttribute.RawStatusString: lambda m: f"PIPS-IPM++ status {m._status}",
     ModelAttribute.SolverName: lambda m: "PIPS-IPM++",
     ModelAttribute.Silent: lambda m: m._silent,
@@ -128,6 +135,7 @@ variable_attribute_set_func_map = {
 constraint_attribute_get_func_map = {
     ConstraintAttribute.Name: lambda m, c: m._cname[c.index],
     ConstraintAttribute.Primal: lambda m, c: m._constraint_primal(c.index),
+    ConstraintAttribute.Dual: lambda m, c: m._dual[c.index],
     ConstraintAttribute.Block: lambda m, c: m._constraint_block(c.index),
 }
 
@@ -164,6 +172,9 @@ class Model:
         self._silent: bool = False
         self._status: Optional[int] = None
         self._objective_value: Optional[float] = None
+        self._runtime: float = 0.0
+        self._dual: list[float] = []
+        self._crow_slot: list[tuple[bool, int]] = []
 
     def add_variable(
         self,
@@ -339,8 +350,15 @@ class Model:
             obj = -obj
         self._objective_value = obj
 
+        self._runtime = float(result.runtime)
         if result.primal is not None:
             self._value = [float(x) for x in result.primal]
+        if result.dual_eq is not None:
+            sign = -1.0 if self._sense == ObjectiveSense.Maximize else 1.0
+            self._dual = [
+                sign * float((result.dual_eq if is_eq else result.dual_ineq)[row])
+                for is_eq, row in self._crow_slot
+            ]
         self._comm.Barrier()
 
     def _obj_vector(self) -> np.ndarray:
@@ -355,6 +373,7 @@ class Model:
     def _split_constraints(self):
         eq_rows, eq_rhs = [], []
         iq_rows, iq_low, iq_upp = [], [], []
+        self._crow_slot = []
         for saf, sense, rhs in zip(self._crows, self._csense, self._crhs):
             const = float(saf.constant) if saf.constant is not None else 0.0
             terms = list(
@@ -362,13 +381,16 @@ class Model:
             )
             b = rhs - const
             if sense == ConstraintSense.Equal:
+                self._crow_slot.append((True, len(eq_rows)))
                 eq_rows.append(terms)
                 eq_rhs.append(b)
             elif sense == ConstraintSense.LessEqual:
+                self._crow_slot.append((False, len(iq_rows)))
                 iq_rows.append(terms)
                 iq_low.append(-INF)
                 iq_upp.append(b)
             elif sense == ConstraintSense.GreaterEqual:
+                self._crow_slot.append((False, len(iq_rows)))
                 iq_rows.append(terms)
                 iq_low.append(b)
                 iq_upp.append(INF)
