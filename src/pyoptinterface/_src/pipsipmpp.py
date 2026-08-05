@@ -386,6 +386,53 @@ class Model:
             ]
         self._comm.Barrier()
 
+    def write_parquet(self, path, layout: str = "monolithic", names: bool = True):
+        """Write the model as annotated parquet without solving it.
+
+        ``layout`` is ``"monolithic"`` for one set of files holding the whole
+        model, or ``"distributed"`` for one set per block, which lets each rank of
+        a later solve read only its own share::
+
+            model.write_parquet("model", layout="distributed")
+
+        The files can be handed to PIPS-IPM++ directly (``pipsparquet model``),
+        inspected with pipstools, or read back with ``pipsipmpppy``. Returns the
+        stem they were written to.
+        """
+        from pipsipmpppy import write_problem
+
+        problem = self._build_problem()
+        return write_problem(
+            problem,
+            path,
+            layout=layout,
+            names=self._names() if names else None,
+            # the problem carries minimisation costs; the sense records how the
+            # model stated them
+            sense=-1.0 if self._sense == ObjectiveSense.Maximize else 1.0,
+        )
+
+    def _names(self) -> Optional[dict]:
+        """Variable and constraint names, in the order the format stores them.
+
+        Rows are stored with every equality first and then every inequality, so
+        the constraint names are woven into that order rather than the order the
+        constraints were added in. Unnamed entries get a positional label, since
+        the format names either all of them or none.
+        """
+        self._split_constraints()  # fills _crow_slot
+        if not any(self._vname) and not any(self._cname):
+            return None
+
+        n_eq = sum(1 for is_eq, _ in self._crow_slot if is_eq)
+        rows: list[str] = [""] * len(self._crow_slot)
+        for index, (is_eq, row) in enumerate(self._crow_slot):
+            rows[row if is_eq else n_eq + row] = self._cname[index] or f"c{index}"
+        return {
+            "cols": [name or f"x{j}" for j, name in enumerate(self._vname)],
+            "rows": rows,
+        }
+
     def _obj_vector(self) -> np.ndarray:
         nv = len(self._lb)
         c = np.zeros(nv, dtype=float)
