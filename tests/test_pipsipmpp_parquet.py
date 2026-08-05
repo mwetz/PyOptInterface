@@ -73,3 +73,50 @@ def test_a_maximisation_records_its_sense(tmp_path):
 def test_unknown_layout_is_reported(tmp_path):
     with pytest.raises(ValueError, match="unknown layout"):
         _two_block_model().write_parquet(tmp_path / "nope", layout="blockwise")
+
+
+@pytest.fixture
+def options_file(tmp_path):
+    """A settings file, as a repeatable run would keep on disk."""
+    path = tmp_path / "base.opt"
+    path.write_text(
+        "# base configuration\n"
+        "SCALER                       geometricmean\n"
+        "PRESOLVE_BOUND_STR_MAX_ITER  7\n"
+    )
+    return path
+
+
+def _solved(model):
+    return model.get_model_attribute(poi.ModelAttribute.ObjectiveValue)
+
+
+def test_options_file_from_the_constructor(options_file):
+    model = _two_block_model()
+    model.set_options_file(options_file)
+    assert model.get_options_file() == options_file
+    model.optimize()
+    # x1 >= 2, x2 >= 3, y >= max(x) = 3  ->  obj = 3 + 0.1*5 = 3.5
+    assert _solved(model) == pytest.approx(3.5, abs=1e-5)
+
+
+def test_options_override_the_file(options_file):
+    """The file is the base; options set on the model win."""
+    model = _two_block_model()
+    model.set_options_file(options_file)
+    model.set_raw_parameter("SCALER", "none")
+    model.set_raw_parameter("PRESOLVE_BOUND_STR_MAX_ITER", 2)
+    model.optimize()
+    assert _solved(model) == pytest.approx(3.5, abs=1e-5)
+
+
+def test_optimize_can_name_a_file_of_its_own(options_file):
+    model = _two_block_model()
+    model.optimize(options_file=options_file)
+    assert _solved(model) == pytest.approx(3.5, abs=1e-5)
+
+
+def test_a_missing_options_file_is_reported(tmp_path):
+    model = _two_block_model()
+    with pytest.raises(FileNotFoundError, match="options file"):
+        model.optimize(options_file=tmp_path / "absent.opt")

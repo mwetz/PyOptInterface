@@ -173,12 +173,20 @@ constraint_attribute_set_func_map = {
 
 
 class Model:
-    def __init__(self, comm=None, jit=None):
+    def __init__(self, comm=None, jit=None, options_file=None):
+        """
+        ``options_file`` names a PIPS-IPM++ settings file - one ``NAME value`` per
+        line, ``#`` and ``//`` starting a comment - read as the *base*
+        configuration, so a run is repeatable from a file while single options
+        stay adjustable. Anything set with :meth:`set_raw_parameter` or passed to
+        :meth:`optimize` overrides it.
+        """
         if comm is None:
             from mpi4py import MPI
 
             comm = MPI.COMM_WORLD
         self._comm = comm
+        self._options_file = options_file
 
         self._lb: list[float] = []
         self._ub: list[float] = []
@@ -358,7 +366,20 @@ class Model:
     def get_raw_parameter(self, name: str):
         return self._options[name]
 
-    def optimize(self, options: Optional[dict] = None) -> None:
+    def set_options_file(self, path) -> None:
+        """Use a PIPS-IPM++ settings file as the base configuration.
+
+        Individual options set on the model or passed to :meth:`optimize`
+        override it. Pass ``None`` to go back to the solver's own defaults.
+        """
+        self._options_file = path
+
+    def get_options_file(self):
+        return self._options_file
+
+    def optimize(
+        self, options: Optional[dict] = None, options_file=None
+    ) -> None:
         from pipsipmpppy import solve
 
         opts = dict(self._options)
@@ -367,7 +388,12 @@ class Model:
 
         # Model is built on rank 0 only, other ranks only solve
         problem = self._build_problem() if self._comm.Get_rank() == 0 else None
-        result = solve(problem, self._comm, options=opts)
+        result = solve(
+            problem,
+            self._comm,
+            options=opts,
+            options_file=options_file if options_file is not None else self._options_file,
+        )
 
         self._status = result.status
         obj = result.objective
