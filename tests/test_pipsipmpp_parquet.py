@@ -51,7 +51,7 @@ def test_both_layouts_describe_the_same_problem(tmp_path):
 
 
 def test_rows_and_columns_carry_their_model_names(tmp_path):
-    stem = _two_block_model().write_parquet(tmp_path / "named")
+    stem = _two_block_model().write_parquet(tmp_path / "named", names=True)
     names = pipsipmpppy.read_names(stem)
 
     assert sorted(names["cols"]) == ["x1", "x2", "y"]
@@ -61,6 +61,36 @@ def test_rows_and_columns_carry_their_model_names(tmp_path):
 def test_names_can_be_left_out(tmp_path):
     stem = _two_block_model().write_parquet(tmp_path / "plain", names=False)
     assert pipsipmpppy.read_names(stem) == {}
+
+    # leaving the names out must not change the structure
+    named = _two_block_model().write_parquet(tmp_path / "named", names=True)
+    keys = ("n", "my", "mz", "myl", "mzl")
+    assert [
+        [b[k] for k in keys] for b in pipsipmpppy.read_manifest(stem)["blocks"]
+    ] == [[b[k] for k in keys] for b in pipsipmpppy.read_manifest(named)["blocks"]]
+
+
+def test_names_line_up_with_the_rows_they_label(tmp_path):
+    """A name on the wrong row would mislabel a plot without failing anywhere."""
+    pq = pytest.importorskip("pyarrow.parquet")
+
+    stem = _two_block_model().write_parquet(tmp_path / "aligned", names=True)
+    cols = pq.read_table(f"{stem}.cols.parquet")
+    rows = pq.read_table(f"{stem}.rows.parquet")
+    amat = pq.read_table(f"{stem}.amat.parquet")
+
+    col_names = cols["name"].to_pylist()
+    row_names = rows["name"].to_pylist()
+    entries = list(zip(amat["row"].to_pylist(), amat["col"].to_pylist()))
+
+    # cap1 is `x1 - y <= 0`, so it touches exactly y and x1
+    row = row_names.index("cap1")
+    assert {col_names[c] for r, c in entries if r == row} == {"y", "x1"}
+
+    # y couples the two leaves, so it is the root variable
+    partition = cols["partition"].to_pylist()
+    assert partition[col_names.index("y")] == 1
+    assert partition[col_names.index("x1")] != 1
 
 
 def test_a_maximisation_records_its_sense(tmp_path):
@@ -120,3 +150,9 @@ def test_a_missing_options_file_is_reported(tmp_path):
     model = _two_block_model()
     with pytest.raises(FileNotFoundError, match="options file"):
         model.optimize(options_file=tmp_path / "absent.opt")
+
+
+def test_names_are_off_by_default(tmp_path):
+    """Producing names costs a pass over the model, so they are opt-in."""
+    stem = _two_block_model().write_parquet(tmp_path / "default")
+    assert pipsipmpppy.read_names(stem) == {}

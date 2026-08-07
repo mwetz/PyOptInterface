@@ -412,7 +412,7 @@ class Model:
             ]
         self._comm.Barrier()
 
-    def write_parquet(self, path, layout: str = "monolithic", names: bool = True):
+    def write_parquet(self, path, layout: str = "monolithic", names: bool = False):
         """Write the model as annotated parquet without solving it.
 
         ``layout`` is ``"monolithic"`` for one set of files holding the whole
@@ -420,6 +420,11 @@ class Model:
         a later solve read only its own share::
 
             model.write_parquet("model", layout="distributed")
+
+        ``names=True`` additionally records each variable and constraint under its
+        own model name, so a matrix plotted from the files is labelled the way the
+        model reads. It is off by default because it costs a pass over the model's
+        names; the structure written is the same either way.
 
         The files can be handed to PIPS-IPM++ directly (``pipsparquet model``),
         inspected with pipstools, or read back with ``pipsipmpppy``. Returns the
