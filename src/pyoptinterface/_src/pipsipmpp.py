@@ -3,7 +3,7 @@
 PIPS-IPM++ is a block-structure exploiting interior-point solver: it uses a
 doubly-bordered block-diagonal problem with diagonal blocks distributed across
 MPI ranks. Recording the LP and its block annotation is handled via the
-PIPS-IPM++ Python interface `pipsipmpppy`.
+PIPS-IPM++ Python interface `pipsipmpp`.
 
 Assignment of blocks to variables is handled via the built-in
 `VariableAttribute.Block`attribute (``0`` = root, ``1..N`` = leaf).
@@ -34,7 +34,7 @@ answer onto the variables::
     print(model.get_value(cap))
 
 Run via ``mpirun -n <k> python your_script.py``. Only rank 0 builds the
-model; every rank then calls `optimize` collectively. pipsipmpppy derives
+model; every rank then calls `optimize` collectively. pipsipmpp derives
 the block structure on rank 0 and scatters the per-rank blocks
 """
 
@@ -86,7 +86,7 @@ def _as_affine(expr) -> ScalarAffineFunction:
 
 
 def _termination_map() -> dict:
-    from pipsipmpppy import TerminationStatus as T
+    from pipsipmpp import TerminationStatus as T
 
     C = TerminationStatusCode
     return {
@@ -383,7 +383,7 @@ class Model:
     def optimize(
         self, options: Optional[dict] = None, options_file=None
     ) -> None:
-        from pipsipmpppy import solve
+        from pipsipmpp import solve
 
         opts = dict(self._options)
         if options:
@@ -439,7 +439,7 @@ class Model:
 
         This is the other half of :meth:`write_parquet`: write the model, solve it
         elsewhere with ``pipsparquet ... writesol`` or
-        ``pipsipmpppy.solve_dataset(..., write_solution=True)``, then read the
+        ``pipsipmpp.solve_dataset(..., write_solution=True)``, then read the
         result back here. Afterwards the model carries exactly what
         :meth:`optimize` would have left on it, so ``get_value``,
         ``ObjectiveValue``, ``TerminationStatus`` and the constraint duals all
@@ -453,7 +453,7 @@ class Model:
         The model must be the one the files were written from: the solution is
         matched to it by position, exactly as an in-memory solve is.
         """
-        from pipsipmpppy import read_solution
+        from pipsipmpp import read_solution
 
         # fills _crow_slot, the equality/inequality slot of every constraint, which
         # is what the dual vectors are indexed by
@@ -486,13 +486,13 @@ class Model:
             model.annotate(4, method="regex", regex=r"\((\d+)\)$")
 
         Passing ``regex=`` selects that method. Further keyword arguments go to
-        ``pipsipmpppy.annotate``. Needs the optional pipstools dependency
-        (``pip install "pipsipmpppy[annotate]"``).
+        ``pipsipmpp.annotate``. Needs the optional pipstools dependency
+        (``pip install "pipsipmpp[annotate]"``).
 
         Returns the number of leaf blocks the annotation ended up using, which can
         be smaller than ``n_blocks`` when a block came out empty.
         """
-        from pipsipmpppy import annotation_from
+        from pipsipmpp import annotation_from
 
         names = None
         if method == "regex" or regex is not None:
@@ -530,10 +530,10 @@ class Model:
         names; the structure written is the same either way.
 
         The files can be handed to PIPS-IPM++ directly (``pipsparquet model``),
-        inspected with pipstools, or read back with ``pipsipmpppy``. Returns the
+        inspected with pipstools, or read back with ``pipsipmpp``. Returns the
         stem they were written to.
         """
-        from pipsipmpppy import write_problem
+        from pipsipmpp import write_problem
 
         problem = self._build_problem()
         return write_problem(
@@ -605,7 +605,7 @@ class Model:
         return eq_rows, eq_rhs, iq_rows, iq_low, iq_upp
 
     def _build_problem(self):
-        from pipsipmpppy import StructuredProblem
+        from pipsipmpp import StructuredProblem
 
         nv = len(self._lb)
         n_blocks = max(self._block) if self._block else 0

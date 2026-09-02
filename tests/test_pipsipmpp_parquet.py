@@ -4,15 +4,17 @@ import pytest
 
 import pyoptinterface as poi
 
-pipsipmpppy = pytest.importorskip("pipsipmpppy")
+pipsipmpp = pytest.importorskip("pipsipmpp")
 pytest.importorskip("pyarrow")
 
-from pyoptinterface import pipsipmpp  # noqa: E402
+# PyOptInterface's backend module carries the same name as the solver interface
+# package it drives, so the backend is bound under a name of its own here
+from pyoptinterface import pipsipmpp as backend  # noqa: E402
 
 
 def _two_block_model(sense=poi.ObjectiveSense.Minimize):
     """Root variable ``y`` coupling two single-variable leaf blocks."""
-    model = pipsipmpp.Model()
+    model = backend.Model()
     y = model.add_variable(lb=0.0, ub=10.0, name="y", block=0)
     x1 = model.add_variable(lb=0.0, name="x1", block=1)
     x2 = model.add_variable(lb=0.0, name="x2", block=2)
@@ -29,17 +31,17 @@ def _two_block_model(sense=poi.ObjectiveSense.Minimize):
 def test_write_parquet_exports_both_layouts(tmp_path, layout):
     stem = _two_block_model().write_parquet(tmp_path / layout, layout=layout)
 
-    manifest = pipsipmpppy.read_manifest(stem)
+    manifest = pipsipmpp.read_manifest(stem)
     assert manifest["layout"] == layout
     assert manifest["n_blocks"] == 3  # the root counts alongside the two leaves
     assert [block["n"] for block in manifest["blocks"]] == [1, 1, 1]
 
 
 def test_both_layouts_describe_the_same_problem(tmp_path):
-    whole = pipsipmpppy.read_manifest(
+    whole = pipsipmpp.read_manifest(
         _two_block_model().write_parquet(tmp_path / "whole")
     )
-    split = pipsipmpppy.read_manifest(
+    split = pipsipmpp.read_manifest(
         _two_block_model().write_parquet(tmp_path / "split", layout="distributed")
     )
 
@@ -52,7 +54,7 @@ def test_both_layouts_describe_the_same_problem(tmp_path):
 
 def test_rows_and_columns_carry_their_model_names(tmp_path):
     stem = _two_block_model().write_parquet(tmp_path / "named", names=True)
-    names = pipsipmpppy.read_names(stem)
+    names = pipsipmpp.read_names(stem)
 
     assert sorted(names["cols"]) == ["x1", "x2", "y"]
     assert sorted(names["rows"]) == ["cap1", "cap2", "demand1", "demand2"]
@@ -60,14 +62,14 @@ def test_rows_and_columns_carry_their_model_names(tmp_path):
 
 def test_names_can_be_left_out(tmp_path):
     stem = _two_block_model().write_parquet(tmp_path / "plain", names=False)
-    assert pipsipmpppy.read_names(stem) == {}
+    assert pipsipmpp.read_names(stem) == {}
 
     # leaving the names out must not change the structure
     named = _two_block_model().write_parquet(tmp_path / "named", names=True)
     keys = ("n", "my", "mz", "myl", "mzl")
     assert [
-        [b[k] for k in keys] for b in pipsipmpppy.read_manifest(stem)["blocks"]
-    ] == [[b[k] for k in keys] for b in pipsipmpppy.read_manifest(named)["blocks"]]
+        [b[k] for k in keys] for b in pipsipmpp.read_manifest(stem)["blocks"]
+    ] == [[b[k] for k in keys] for b in pipsipmpp.read_manifest(named)["blocks"]]
 
 
 def test_names_line_up_with_the_rows_they_label(tmp_path):
@@ -97,7 +99,7 @@ def test_a_maximisation_records_its_sense(tmp_path):
     model = _two_block_model(poi.ObjectiveSense.Maximize)
     stem = model.write_parquet(tmp_path / "maxi")
     # the problem holds minimisation costs; objcoef says how the model stated them
-    assert pipsipmpppy.read_manifest(stem)["objcoef"] == -1.0
+    assert pipsipmpp.read_manifest(stem)["objcoef"] == -1.0
 
 
 def test_unknown_layout_is_reported(tmp_path):
@@ -155,13 +157,13 @@ def test_a_missing_options_file_is_reported(tmp_path):
 def test_names_are_off_by_default(tmp_path):
     """Producing names costs a pass over the model, so they are opt-in."""
     stem = _two_block_model().write_parquet(tmp_path / "default")
-    assert pipsipmpppy.read_names(stem) == {}
+    assert pipsipmpp.read_names(stem) == {}
 
 
 def _solution_beside(stem, sense=1.0):
     """Write a solution whose values are the global index they belong to."""
-    from pipsipmpppy import TerminationStatus
-    from pipsipmpppy.flat import solver_order, write_solution
+    from pipsipmpp import TerminationStatus
+    from pipsipmpp.flat import solver_order, write_solution
 
     order = solver_order(stem)
     write_solution(
@@ -180,7 +182,7 @@ def _solution_beside(stem, sense=1.0):
 
 def _mixed_model(sense=poi.ObjectiveSense.Minimize):
     """Two leaf blocks, one equality and two inequalities, so both duals matter."""
-    model = pipsipmpp.Model()
+    model = backend.Model()
     y = model.add_variable(lb=0.0, name="y", block=0)
     x1 = model.add_variable(lb=0.0, name="x1", block=1)
     x2 = model.add_variable(lb=0.0, name="x2", block=2)
@@ -248,7 +250,7 @@ N_TIME, N_BLOCKS = 12, 4
 def _unstructured_model():
     """``cap`` shared by every period, ``x(t)`` per period, and no block stated."""
     demand = [1.0 + t / (N_TIME - 1) for t in range(N_TIME)]
-    model = pipsipmpp.Model()
+    model = backend.Model()
     cap = model.add_variable(lb=0.0, name="cap")
     x = [model.add_variable(lb=0.0, name=f"x({t})") for t in range(N_TIME)]
     for t in range(N_TIME):
@@ -290,7 +292,7 @@ def test_the_derived_blocks_are_readable_as_a_variable_attribute():
 
 
 def test_regex_without_named_variables_is_refused():
-    model = pipsipmpp.Model()
+    model = backend.Model()
     a = model.add_variable(lb=0.0)
     b = model.add_variable(lb=0.0)
     model.add_linear_constraint(a + b, poi.Geq, 1.0)
@@ -306,7 +308,7 @@ def test_a_derived_structure_carries_into_the_written_files(tmp_path, method):
     model, _cap, _x = _unstructured_model()
     model.annotate(N_BLOCKS, **ANNOTATIONS[method])
 
-    manifest = pipsipmpppy.read_manifest(model.write_parquet(tmp_path / method))
+    manifest = pipsipmpp.read_manifest(model.write_parquet(tmp_path / method))
 
     # the root counts alongside the leaves
     assert manifest["n_blocks"] == N_BLOCKS + 1
@@ -340,7 +342,7 @@ def test_a_derived_structure_solves_and_survives_a_parquet_roundtrip(tmp_path, m
     files.annotate(N_BLOCKS, **ANNOTATIONS[method])
     stem = files.write_parquet(tmp_path / f"{method}-model", layout="distributed")
     # step two: solve from the files alone
-    pipsipmpppy.solve_dataset(stem, comm, write_solution=True)
+    pipsipmpp.solve_dataset(stem, comm, write_solution=True)
     # step three: read it back onto the model, which needs no solver either
     files.read_parquet_solution(stem)
 
