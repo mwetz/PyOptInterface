@@ -9,6 +9,13 @@ Assignment of blocks to variables is handled via the built-in
 `VariableAttribute.Block`attribute (``0`` = root, ``1..N`` = leaf).
 Equation blocks are derived automatically from the variables a constraint touches.
 
+A model built without any block assignment can have one derived for it with
+:meth:`Model.annotate`, which hands the matrix to pipstools and writes the
+answer onto the variables::
+
+    model.annotate(4, method="hypergraph")   # or method="regex", regex=...
+    model.optimize()
+
 ::
     import pyoptinterface as poi
     from pyoptinterface import pipsipmpp
@@ -181,10 +188,6 @@ class Model:
         stay adjustable. Anything set with :meth:`set_raw_parameter` or passed to
         :meth:`optimize` overrides it.
         """
-        if comm is None:
-            from mpi4py import MPI
-
-            comm = MPI.COMM_WORLD
         self._comm = comm
         self._options_file = options_file
 
@@ -386,15 +389,35 @@ class Model:
         if options:
             opts.update(options)
 
+        comm = self._resolve_comm()
+
         # Model is built on rank 0 only, other ranks only solve
-        problem = self._build_problem() if self._comm.Get_rank() == 0 else None
+        problem = self._build_problem() if comm.Get_rank() == 0 else None
         result = solve(
             problem,
-            self._comm,
+            comm,
             options=opts,
             options_file=options_file if options_file is not None else self._options_file,
         )
 
+        self._apply_result(result)
+        comm.Barrier()
+
+    def _resolve_comm(self):
+        """The communicator to solve on, defaulting to ``MPI.COMM_WORLD``."""
+        if self._comm is None:
+            from mpi4py import MPI
+
+            self._comm = MPI.COMM_WORLD
+        return self._comm
+
+    def _apply_result(self, result) -> None:
+        """Put a PIPS-IPM++ result onto the model.
+
+        Both :meth:`optimize` and :meth:`read_parquet_solution` end here, so a
+        solution read back from file leaves the model in the state a solve would
+        have left it in.
+        """
         self._status = result.status
         obj = result.objective
         if self._sense == ObjectiveSense.Maximize:
@@ -410,7 +433,87 @@ class Model:
                 sign * float((result.dual_eq if is_eq else result.dual_ineq)[row])
                 for is_eq, row in self._crow_slot
             ]
-        self._comm.Barrier()
+
+    def read_parquet_solution(self, path) -> None:
+        """Load a solution written beside the parquet problem at ``path``.
+
+        This is the other half of :meth:`write_parquet`: write the model, solve it
+        elsewhere with ``pipsparquet ... writesol`` or
+        ``pipsipmpppy.solve_dataset(..., write_solution=True)``, then read the
+        result back here. Afterwards the model carries exactly what
+        :meth:`optimize` would have left on it, so ``get_value``,
+        ``ObjectiveValue``, ``TerminationStatus`` and the constraint duals all
+        behave the same::
+
+            model.write_parquet("model", layout="distributed")
+            # ... solved elsewhere ...
+            model.read_parquet_solution("model")
+            model.get_value(cap)
+
+        The model must be the one the files were written from: the solution is
+        matched to it by position, exactly as an in-memory solve is.
+        """
+        from pipsipmpppy import read_solution
+
+        # fills _crow_slot, the equality/inequality slot of every constraint, which
+        # is what the dual vectors are indexed by
+        self._split_constraints()
+        self._apply_result(read_solution(path))
+
+    def annotate(
+        self,
+        n_blocks: int,
+        method: str = "hypergraph",
+        regex: Optional[str] = None,
+        **options,
+    ) -> int:
+        r"""Derive a block structure for a model that was built without one.
+
+        The blocks are found in the matrix rather than stated variable by
+        variable, which is the path for a model whose structure is not known up
+        front. Call it once the model is complete, and the annotation is written
+        onto the variables, so ``optimize``, ``write_parquet`` and
+        ``VariableAttribute.Block`` all see it afterwards::
+
+            model.annotate(4, method="hypergraph")
+            model.optimize()
+
+        ``method`` is ``"hypergraph"``, which partitions the matrix with
+        mt-kahypar, or ``"regex"``, which groups the variables by a capture taken
+        from their names and is exact when the names already carry the
+        structure::
+
+            model.annotate(4, method="regex", regex=r"\((\d+)\)$")
+
+        Passing ``regex=`` selects that method. Further keyword arguments go to
+        ``pipsipmpppy.annotate``. Needs the optional pipstools dependency
+        (``pip install "pipsipmpppy[annotate]"``).
+
+        Returns the number of leaf blocks the annotation ended up using, which can
+        be smaller than ``n_blocks`` when a block came out empty.
+        """
+        from pipsipmpppy import annotation_from
+
+        names = None
+        if method == "regex" or regex is not None:
+            if not any(self._vname):
+                raise ValueError(
+                    "The regex method matches on variable names, and none of the "
+                    "variables of this model are named. Name them when adding "
+                    'them, or use method="hypergraph" to partition the matrix.'
+                )
+            names = [name or f"x{j}" for j, name in enumerate(self._vname)]
+
+        var_block, n_leaves = annotation_from(
+            self._build_problem(),
+            n_blocks,
+            method=method,
+            regex=regex,
+            names=names,
+            **options,
+        )
+        self._block = [int(block) for block in var_block]
+        return n_leaves
 
     def write_parquet(self, path, layout: str = "monolithic", names: bool = False):
         """Write the model as annotated parquet without solving it.
